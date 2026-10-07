@@ -3,7 +3,7 @@
   ESP32 подключается к нагрудному датчику Polar H7 по BLE
   (стандартный профиль Heart Rate Service) и выводит BPM в Serial Monitor.
 
-  Требуется библиотека: "NimBLE-Arduino" (автор h2zero) версии 2.x или выше
+  Требуется библиотека: "NimBLE-Arduino" версии 2.x (автор h2zero)
   Установка: Arduino IDE -> Sketch -> Include Library -> Manage Libraries -> "NimBLE-Arduino"
 
   Плата: ESP32 Dev Module (или ваша конкретная плата)
@@ -16,7 +16,7 @@
 static NimBLEUUID serviceUUID((uint16_t)0x180D);   // Heart Rate Service
 static NimBLEUUID charUUID((uint16_t)0x2A37);      // Heart Rate Measurement
 
-static NimBLEAdvertisedDevice* targetDevice = nullptr;
+static const NimBLEAdvertisedDevice* targetDevice = nullptr;
 static NimBLEClient* pClient = nullptr;
 static bool doConnect = false;
 static bool connected = false;
@@ -42,16 +42,16 @@ void notifyCallback(NimBLERemoteCharacteristic* pChar, uint8_t* pData, size_t le
 
 // --- Колбэки подключения к клиенту ---
 class ClientCallbacks : public NimBLEClientCallbacks {
-  void onConnect(NimBLEClient* pclient) {
+  void onConnect(NimBLEClient* pclient) override {
     Serial.println("Подключено к датчику");
   }
-  void onDisconnect(NimBLEClient* pclient, int reason) {
+  void onDisconnect(NimBLEClient* pclient, int reason) override {
     connected = false;
     Serial.println("Соединение разорвано, ищем датчик снова...");
   }
 };
 
-// --- Колбэк сканирования (v2.x) ---
+// --- Колбэк сканирования: ищем устройство с сервисом Heart Rate ---
 class ScanCallbacks : public NimBLEScanCallbacks {
   void onResult(const NimBLEAdvertisedDevice* advertisedDevice) override {
     if (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService(serviceUUID)) {
@@ -59,7 +59,7 @@ class ScanCallbacks : public NimBLEScanCallbacks {
       Serial.println(advertisedDevice->toString().c_str());
 
       NimBLEDevice::getScan()->stop();
-      targetDevice = new NimBLEAdvertisedDevice(*advertisedDevice);
+      targetDevice = advertisedDevice;
       doConnect = true;
     }
   }
@@ -105,7 +105,7 @@ void setup() {
 
   NimBLEDevice::init("");
   NimBLEScan* pBLEScan = NimBLEDevice::getScan();
-  pBLEScan->setScanCallbacks(new ScanCallbacks()); // v2.x: setScanCallbacks
+  pBLEScan->setScanCallbacks(new ScanCallbacks());
   pBLEScan->setActiveScan(true);
   pBLEScan->start(10, false);
 }
@@ -118,11 +118,13 @@ void loop() {
     doConnect = false;
   }
 
-  // Если связь разорвана — запускаем сканирование заново
-  if (!connected && targetDevice != nullptr && !doConnect) {
-    Serial.println("Повторный поиск датчика...");
-    NimBLEDevice::getScan()->start(5, false);
-    delay(3000);
+  // Если датчик ещё не найден или связь разорвана — перезапускаем сканирование
+  if (!connected && !doConnect) {
+    NimBLEScan* pScan = NimBLEDevice::getScan();
+    if (!pScan->isScanning()) {
+      Serial.println("Повторный поиск датчика...");
+      pScan->start(5, false);
+    }
   }
 
   delay(500);
